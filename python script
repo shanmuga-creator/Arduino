@@ -1,0 +1,70 @@
+import serial
+import pandas as pd
+import time
+import re
+
+# Setup serial connection (adjust COM port as necessary)
+arduino = serial.Serial('COM4', 115200, timeout=1)  # Use the correct port for your setup
+time.sleep(2)  # Wait for the Arduino to initialize
+
+# Create an empty DataFrame to store flow rate and total volume data
+columns = ['Timestamp', 'FlowRate (L/min)', 'TotalVolume (L)']
+data = pd.DataFrame(columns=columns)
+
+# Regex patterns to match FlowRate and TotalVolume from the Arduino output
+flow_rate_pattern = r"FlowRate:\s*([0-9]*\.?[0-9]+)L/min"  # Match flow rate (float or integer)
+total_volume_pattern = r"TotalVolume:\s*([0-9]*\.?[0-9]+)L"  # Match total volume (float or integer)
+
+# Loop to continuously read data from Arduino
+try:
+    while True:
+        if arduino.in_waiting > 0:
+            line = arduino.readline().decode('utf-8', errors='ignore').strip()
+            print(f"Received raw data: {line}")  # Print the raw data to see the exact format
+
+            # Use regex to extract FlowRate and TotalVolume
+            flow_rate_match = re.search(flow_rate_pattern, line)
+            total_volume_match = re.search(total_volume_pattern, line)
+
+            # If data is matched, print it
+            if flow_rate_match:
+                print(f"FlowRate match: {flow_rate_match.group(1)}")
+            else:
+                print("FlowRate pattern not matched.")
+                
+            if total_volume_match:
+                print(f"TotalVolume match: {total_volume_match.group(1)}")
+            else:
+                print("TotalVolume pattern not matched.")
+
+            if flow_rate_match and total_volume_match:
+                try:
+                    # Extract FlowRate and TotalVolume values (convert to float)
+                    flow_rate = float(flow_rate_match.group(1))  # Convert matched string to float
+                    total_volume = float(total_volume_match.group(1))  # Convert matched string to float
+
+                    # Get the current timestamp
+                    timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
+
+                    # Append the data to the DataFrame
+                    new_data = pd.DataFrame([[timestamp, flow_rate, total_volume]], columns=columns)
+                    data = pd.concat([data, new_data], ignore_index=True)
+
+                    # Save to Excel (this will overwrite every time for simplicity)
+                    data.to_excel('flow_data.xlsx', index=False)
+
+                    # Optionally, add a sleep time if needed to avoid excessive writing to the file
+                    time.sleep(1)
+
+                except ValueError as e:
+                    print(f"Error converting data to float: {e}")
+                    continue
+            else:
+                print("Error: Could not parse the data. Ensure data format matches expected pattern.")
+                continue
+
+except KeyboardInterrupt:
+    print("Logging stopped.")
+
+finally:
+    arduino.close()
