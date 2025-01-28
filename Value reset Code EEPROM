@@ -1,0 +1,120 @@
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+#include <EEPROM.h>
+
+#define FLOW_SENSOR_PIN D6   // Pin connected to flow sensor signal
+#define RESET_BUTTON_PIN D7  // Pin connected to the reset button
+#define FLOW_CONSTANT 7.5    // Flow constant for the sensor
+#define EEPROM_SIZE 512      // Define the size of EEPROM
+
+LiquidCrystal_I2C lcd(0x27, 20, 4); // LCD I2C address and size
+
+volatile int pulseCount = 0;
+float flowRate = 0.0;
+float totalVolume = 0.0;
+unsigned long lastTime = 0;
+
+void IRAM_ATTR pulseCounter() {
+  pulseCount++;
+}
+
+void setup() {
+  Serial.begin(115200); // Set the baud rate to 115200 for serial communication
+  pinMode(FLOW_SENSOR_PIN, INPUT_PULLUP);
+  pinMode(RESET_BUTTON_PIN, INPUT_PULLUP); // Configure reset button pin with pull-up
+  attachInterrupt(digitalPinToInterrupt(FLOW_SENSOR_PIN), pulseCounter, FALLING);
+
+  lcd.init();
+  lcd.backlight();
+
+  // Initialize EEPROM
+  EEPROM.begin(EEPROM_SIZE);
+
+  // Retrieve total volume from EEPROM
+  EEPROM.get(0, totalVolume);
+  if (isnan(totalVolume)) {
+    totalVolume = 0.0; // Reset if value is not valid
+    Serial.println("EEPROM data invalid, resetting totalVolume to 0.0");
+  } else {
+    Serial.println("Retrieved totalVolume from EEPROM: " + String(totalVolume));
+  }
+
+  // Display initial values on the LCD
+  lcd.setCursor(0, 0);
+  lcd.print("ACIC-KIF FLOW METER");
+
+  lcd.setCursor(0, 1);
+  lcd.print("FlowRate: ");
+  lcd.print(flowRate, 2);
+  lcd.print("L/min");
+
+  lcd.setCursor(0, 2);
+  lcd.print("TotalVol: ");
+  lcd.print(totalVolume, 2);
+  lcd.print("L");
+
+  delay(5000); // Display initial values for 5 seconds
+
+  lcd.clear();
+}
+
+void loop() {
+  unsigned long currentTime = millis();
+  unsigned long elapsedTime = currentTime - lastTime;
+
+  // Check if reset button is pressed
+  if (digitalRead(RESET_BUTTON_PIN) == LOW) { // Button pressed (LOW due to pull-up)
+    totalVolume = 0.0; // Reset total volume
+    EEPROM.put(0, totalVolume);
+    EEPROM.commit(); // Commit changes to EEPROM
+    Serial.println("Total volume reset to 0.0 and updated in EEPROM");
+
+    // Display reset confirmation on LCD
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Total Volume Reset!");
+    delay(2000); // Wait 2 seconds before resuming normal operation
+    lcd.clear();
+  }
+
+  if (elapsedTime >= 1000) { // Update every second
+    flowRate = (pulseCount / FLOW_CONSTANT) / (elapsedTime / 1000.0); // L/min
+    totalVolume += (flowRate / 60.0); // Convert L/min to Liters per second
+
+    pulseCount = 0; // Reset the pulse counter
+    lastTime = currentTime;
+
+    // Store the total volume in EEPROM only if it changes significantly
+    static float lastSavedVolume = 0.0;
+    if (abs(totalVolume - lastSavedVolume) >= 0.1) { // Save only if change >= 0.1 L
+      EEPROM.put(0, totalVolume);
+      EEPROM.commit(); // Commit changes to make them persistent
+      lastSavedVolume = totalVolume;
+
+      Serial.println("Updated totalVolume stored in EEPROM: " + String(totalVolume));
+    }
+
+    // Display the data on LCD
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("ACIC-KIF FLOW METER");
+
+    lcd.setCursor(0, 1);
+    lcd.print("FlowRate: ");
+    lcd.print(flowRate, 2);
+    lcd.print("L/min");
+
+    lcd.setCursor(0, 2);
+    lcd.print("TotalVol: ");
+    lcd.print(totalVolume, 2);
+    lcd.print("L");
+
+    // Optionally, print values to the serial monitor for debugging
+    Serial.print("ACIC-KIF FLOW METER: ");
+    Serial.print(" | FlowRate: ");
+    Serial.print(flowRate, 2);
+    Serial.print("L/min | TotalVolume: ");
+    Serial.print(totalVolume, 2);
+    Serial.println("L");
+  }
+}
